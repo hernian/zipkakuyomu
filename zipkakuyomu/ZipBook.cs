@@ -29,59 +29,62 @@ namespace zipkakuyomu
 
         public Task SaveAsync(string pathDest, CancellationToken ct)
         {
-            return Task.Run(() => 
+            return Task.Run(() => SaveInternal(pathDest, ct), ct);
+        }
+
+        private void SaveInternal(string pathDest, CancellationToken ct)
+        {
+            var completed = false;
+            var pathTemp = $"{pathDest}.temp";
+            try
             {
-                var completed = false;
-                var pathTemp = $"{pathDest}.temp";
-                try
+                ct.ThrowIfCancellationRequested();
+                var enc = new UTF8Encoding(false);
+                var dirOut = Path.GetDirectoryName(pathDest);
+                if (!string.IsNullOrEmpty(dirOut))
                 {
-                    ct.ThrowIfCancellationRequested();
-                    var enc = new UTF8Encoding(false);
-                    var dirOut = Path.GetDirectoryName(pathDest);
-                    if (!string.IsNullOrEmpty(dirOut))
+                    Directory.CreateDirectory(dirOut);
+                }
+                if (File.Exists(pathTemp))
+                {
+                    File.Delete(pathTemp);
+                }
+                var format = GetEpisodeNumberFormat();
+                // zipArchive.Dispose()を呼び出した後にFile.Move()する必要がある
+                // なので、旧いusing形式にしてzipArchiveのスコープを明確に制限した
+                using (var zipArchive = ZipFile.Open(pathTemp, ZipArchiveMode.Create))
+                {
+                    foreach (var episode in _listEpisode)
                     {
-                        Directory.CreateDirectory(dirOut);
+                        ct.ThrowIfCancellationRequested();
+                        var entryName = $"episode_{episode.EpisodeNumber.ToString(format)}.txt";
+                        var entry = zipArchive.CreateEntry(entryName);
+                        using var entryStream = entry.Open();
+                        using var writer = new StreamWriter(entryStream, enc);
+                        writer.Write(episode.Title);
+                        foreach (var paragraph in episode.Paragraphs)
+                        {
+                            writer.WriteLine(paragraph);
+                        }
                     }
-                    if (File.Exists(pathTemp))
+                }
+                File.Move(pathTemp, pathDest, true);
+                completed = true;
+            }
+            finally
+            {
+                if (!completed)
+                {
+                    try
                     {
                         File.Delete(pathTemp);
                     }
-                    var format = GetEpisodeNumberFormat();
-                    // zipArchive.Dispose()を呼び出した後にFile.Move()する必要がある
-                    // なので、旧いusing形式にしてzipArchiveのスコープを明確に制限した
-                    using (var zipArchive = ZipFile.Open(pathTemp, ZipArchiveMode.Create))
+                    catch
                     {
-                        foreach (var episode in _listEpisode)
-                        {
-                            ct.ThrowIfCancellationRequested();
-                            var entryName = $"episode_{episode.EpisodeNumber.ToString(format)}.txt";
-                            var entry = zipArchive.CreateEntry(entryName);
-                            using var entryStream = entry.Open();
-                            using var writer = new StreamWriter(entryStream, enc);
-                            foreach (var paragraph in episode.Paragraphs)
-                            {
-                                writer.WriteLine(paragraph);
-                            }
-                        }
-                    }
-                    File.Move(pathTemp, pathDest, true);
-                    completed = true;
-                }
-                finally
-                {
-                    if (!completed)
-                    {
-                        try
-                        {
-                            File.Delete(pathTemp);
-                        }
-                        catch
-                        {
-                            // リカバリできることはないので、例外を無視する
-                        }
+                        // リカバリできることはないので、例外を無視する
                     }
                 }
-            }, ct);
+            }
         }
 
         private string GetEpisodeNumberFormat()
